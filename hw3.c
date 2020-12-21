@@ -7,8 +7,10 @@
 #include<sys/types.h>
 #include<sys/socket.h>
 #include<netinet/in.h>
+#include<netinet/ip.h>
 #include<arpa/inet.h>
 #include<time.h>
+#include<linux/ipv6.h>
 
 #define SIZE_ETHERNET 14 //header 14 bytes
 #define ETHER_ADDR_LEN 6 //address 6 bytes
@@ -47,6 +49,18 @@ typedef struct iheader {
 #define IP_HL(ip) (((ip)->ip_vhl) & 0x0f)
 #define IP_V(ip)  (((ip)->ip_vhl) >> 4)
 
+struct ipv6_header{
+    unsigned int
+        version : 4,
+        traffic_class : 8,
+        flow_label : 20;
+    uint16_t length;
+    uint8_t  next_header;
+    uint8_t  hop_limit;
+    struct in6_addr src;
+    struct in6_addr dst;
+};
+
 //TCP header
 typedef u_int tcp_seq;
 
@@ -71,6 +85,24 @@ typedef struct theader {
 	u_short th_sum;					//checksum
 	u_short th_urp;					//urgent pointer
 }TCP;
+
+
+
+char *my_ntop(uint8_t *addr){
+	char *a=(char*)malloc(sizeof(char)*256);
+	char tmp[30];
+	memset(a,0,sizeof(a));
+	for(int i=0;i<8;i++){
+		sprintf(tmp,"%02x%02x",addr[i*2],addr[i*2+1]);
+	
+		strcat(a,tmp);
+		if(i!=7){
+			strcat(a,":");
+		}
+	}
+	return a;
+
+}
 
 void packet_reader(u_char *args, const struct pcap_pkthdr *header, const u_char *packet){
 	static int count = 0;		//packet counter
@@ -98,27 +130,51 @@ void packet_reader(u_char *args, const struct pcap_pkthdr *header, const u_char 
     printf("    Dst MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", ethernet->ether_dhost[0],ethernet->ether_dhost[1],ethernet->ether_dhost[2],ethernet->ether_dhost[3],ethernet->ether_dhost[4],ethernet->ether_dhost[5]);
     printf("   Ethernet: 0x%04x\n", ntohs(ethernet->ether_type));
 
-    if(ntohs(ethernet->ether_type) == 0x0800){ //IP
+    if(ntohs(ethernet->ether_type) == 0x0800){ //IPv4
         int size_ip;
         ip = (IP*)(packet + SIZE_ETHERNET);
         size_ip = IP_HL(ip)*4;
 
         if(ip->ip_p == 0x06){ //TCP/IP
-            printf("   Protocol: TCP/IP\n");
+            printf("   Protocol: TCP/IPv4\n");
             tcp = (TCP*)(packet + SIZE_ETHERNET + size_ip);
             printf("       From: %s:%d\n", inet_ntoa(ip->ip_src), ntohs(tcp->th_sport));
             printf("         To: %s:%d\n", inet_ntoa(ip->ip_dst), ntohs(tcp->th_dport));
         }
         else if(ip->ip_p == 0x11){ //UDP/IP
-            printf("   Protocol: UDP/IP\n");
+            printf("   Protocol: UDP/IPv4\n");
             udp = (UDP*)(packet + SIZE_ETHERNET + size_ip);
             printf("       From: %s:%d\n", inet_ntoa(ip->ip_src), ntohs(udp->uh_sport));
             printf("         To: %s:%d\n", inet_ntoa(ip->ip_dst), ntohs(udp->uh_dport));
         }
         else{ //IP
-            printf("   Protocol: IP\n");
+            printf("   Protocol: IPv4\n");
             printf("       From: %s\n", inet_ntoa(ip->ip_src));
             printf("         To: %s\n", inet_ntoa(ip->ip_dst));
+        }
+    }
+	else if(ntohs(ethernet->ether_type) == 0x86dd){ //IPv6
+        int size_ip;
+        ip = (IP*)(packet + SIZE_ETHERNET);
+        size_ip = IP_HL(ip)*4;
+		struct ipv6hdr *ipv6=(struct ipv6hdr*)(packet + SIZE_ETHERNET);
+
+        if(ip->ip_p == 0x06){ //TCP/IP
+            printf("   Protocol: TCP/IPv6\n");
+            tcp = (TCP*)(packet + SIZE_ETHERNET + size_ip);
+            printf("       From: [%s]:%d\n", my_ntop(ipv6->saddr.s6_addr), ntohs(tcp->th_sport));
+            printf("         To: [%s]:%d\n", my_ntop(ipv6->daddr.s6_addr), ntohs(tcp->th_dport));
+        }
+        else if(ip->ip_p == 0x11){ //UDP/IP
+            printf("   Protocol: UDP/IPv6\n");
+            udp = (UDP*)(packet + SIZE_ETHERNET + size_ip);
+            printf("       From: [%s]:%d\n", my_ntop(ipv6->saddr.s6_addr), ntohs(udp->uh_sport));
+            printf("         To: [%s]:%d\n", my_ntop(ipv6->daddr.s6_addr), ntohs(udp->uh_dport));
+        }
+        else{ //IP
+            printf("   Protocol: IPv6\n");
+            printf("       From: %s\n", my_ntop(ipv6->saddr.s6_addr));
+            printf("         To: %s\n", my_ntop(ipv6->daddr.s6_addr));
         }
     }
 }
